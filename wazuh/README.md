@@ -1,27 +1,27 @@
 # Wazuh Docker Certificate Generation Script/Image
 
-This instructions are taken from the <a href="https://github.com/wazuh/wazuh-docker">Official Wazuh Docker Repo</a>. For our purposes only the first two steps are needed.
+Estas instrucciones están tomadas del Repositorio Oficial Docker de Wazuh. Para nuestros propósitos, solo se necesitan los dos primeros pasos.
 
-## Deploy Wazuh Docker in single node configuration
+### Despliega Wazuh Docker en configuración de nodo único
 
-This deployment is defined in the `docker-compose.yml` file with one Wazuh manager containers, one Wazuh indexer containers, and one Wazuh dashboard container. It can be deployed by following these steps: 
+Este despliegue está definido en el archivo con un contenedor gestor Wazuh, un contenedor indexador Wazuh y un contenedor dashboard Wazuh. Se puede desplegar siguiendo estos pasos:docker-compose.yml
 
-1) Increase max_map_count on your host (Linux). This command must be run with root permissions:
+1) Aumenta max_map_count en tu host (Linux). Este comando debe ejecutarse con permisos root:
 ```
 $ sysctl -w vm.max_map_count=262144
 ```
-2) Para los certificados hay que descargar:
+2) Ejecuta el script de creación de certificados:
 ```
-$ wget https://packages.wazuh.com/4.14/wazuh-certs-tool.sh
+$ docker-compose -f generate-indexer-certs.yml run --rm generator
 ```
-3) Dale permisos:
+3) Comienza el entorno con docker-compose:
+ - En el antegrama:
+ ```
+$ docker-compose up
+```
+- De fondo:
+```
+$ docker-compose up -d
+```
 
-```
-chmod +x wazuh-certs-tool.sh
-```
--Ejecutar
-```
-./wazuh-certs-tool.sh -A
-```
-
-The environment takes about 1 minute to get up (depending on your Docker host) for the first time since Wazuh Indexer must be started for the first time and the indexes and index patterns must be generated.
+El entorno tarda aproximadamente 1 minuto en activarse (dependiendo de tu host Docker) por primera vez, ya que Wazuh Indexer debe iniciarse por primera vez y generar los índices y patrones de índices.

@@ -1,10 +1,3 @@
-## Pre-despliegue
-El primer paso es construir la imagen del Custom Wazuh Manager usando el script de compilación proporcionado en wazuh/custom-wazuh-manager, allí encontrarás las instrucciones para la compilación.
-A continuación, tienes que crear, por el medio que prefieras, los certificados SSL de Wazuh requeridos y colocarlos en el directorio wazuh/config/wazuh_indexer_ssl_certs. Estoy proporcionando la generación oficial de certificados de Wazuh Escritura bajo Wazuh/generate-indexer-certs.yml. Las instrucciones para ejecutar este contenedor/script se pueden encontrar en el Repositorio Docker Oficial de Wazuh y también en el subdirectorio específico. Nota: También copia el certificado root-ca.pem en el subdirectorio graylog/, ya que lo necesitarás en un paso posterior.
-Tras la compilación exitosa de la Imagen Custom Wazuh y la generación de certificados SSL, el siguiente paso es modificar todos los archivos de configuración proporcionados en el subdirectorio de cada módulo, tal como los proporcionados son plantillas tomadas de la documentación de cada herramienta; y también el archivo .env, que viene pre-rellenado hasta cierto punto para tu comodidad y se encuentra en la raíz del directorio, para adaptarse a tu Entorno y necesidades. Consulta la documentación de cada herramienta o sigue el canal de Youtube de Taylor Walton para recibir orientación sobre cómo hacerlo Configura cada herramienta.
-También tendrás que seguir el paso previo al despliegue que se describe en la sección Graylog. graylog/README.md
-Una vez que eso esté fuera del camino, estás listo para el Despliegue.
-
 ## Despliegue
 Ahora puedes iniciar todos los contenedores de forma segura ejecutando:
 

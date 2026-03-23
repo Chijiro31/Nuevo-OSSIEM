@@ -10,19 +10,18 @@ This deployment is defined in the `docker-compose.yml` file with one Wazuh manag
 ```
 $ sysctl -w vm.max_map_count=262144
 ```
-2) Run the certificate creation script:
+2) Para los certificados hay que descargar:
 ```
-$ docker-compose -f wazuh_indexer_ssl_certs.yml run --rm generator
+$ wget https://packages.wazuh.com/4.14/wazuh-certs-tool.sh
 ```
-3) Start the environment with docker-compose:
+3) Dale permisos:
 
-- In the foregroud:
 ```
-$ docker-compose up
+chmod +x wazuh-certs-tool.sh
 ```
-- In the background:
+-Ejecutar
 ```
-$ docker-compose up -d
+./wazuh-certs-tool.sh -A
 ```
 
 The environment takes about 1 minute to get up (depending on your Docker host) for the first time since Wazuh Indexer must be started for the first time and the indexes and index patterns must be generated.

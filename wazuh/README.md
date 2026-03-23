@@ -12,7 +12,7 @@ $ sysctl -w vm.max_map_count=262144
 ```
 2) Ejecuta el script de creación de certificados:
 ```
-$ docker-compose -f generate-indexer-certs.yml run --rm generator
+$ docker-compose -f generete-indexer-certs.yml run --rm generator
 ```
 3) Comienza el entorno con docker-compose:
  - En el antegrama:

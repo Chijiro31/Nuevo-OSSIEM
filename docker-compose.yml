@@ -106,13 +106,18 @@ services:
   ###########
   # MongoDB: https://hub.docker.com/_/mongo/
   mongodb:
-    image: mongo:8.2
+    image: mongo:8.2.6
     container_name: mongodb
     hostname: mongodb
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=admin
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
     restart: unless-stopped
+    # NUEVO: Solo si tienes problemas de SSL
+    #command: mongod --tlsMode disabled
 
   # Graylog: https://hub.docker.com/r/graylog/graylog/
   graylog:

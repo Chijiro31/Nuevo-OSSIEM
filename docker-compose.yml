@@ -3,7 +3,7 @@ services:
   # Wazuh #
   #########
   wazuh.manager:
-    image: ghcr.io/socfortress/wazuh-manager:4.14.4
+    image: ghcr.io/socfortress/wazuh-manager:4.13.1
     container_name: wazuh.manager
     hostname: wazuh.manager
     ulimits:
@@ -50,7 +50,7 @@ services:
     restart: unless-stopped
 
   wazuh.indexer:
-    image: wazuh/wazuh-indexer:4.14.4
+    image: wazuh/wazuh-indexer:4.13.1
     container_name: wazuh.indexer
     hostname: wazuh.indexer
     ports:
@@ -76,7 +76,7 @@ services:
     restart: unless-stopped
 
   wazuh.dashboard:
-    image: wazuh/wazuh-dashboard:4.14.4
+    image: wazuh/wazuh-dashboard:4.13.1
     container_name: wazuh.dashboard
     hostname: wazuh.dashboard
     ports:
@@ -106,7 +106,7 @@ services:
   ###########
   # MongoDB: https://hub.docker.com/_/mongo/
   mongodb:
-    image: mongo:8.2.6
+    image: mongo:7.0
     container_name: mongodb
     hostname: mongodb
     environment:
@@ -121,7 +121,7 @@ services:
 
   # Graylog: https://hub.docker.com/r/graylog/graylog/
   graylog:
-    image: graylog/graylog:7.0.5
+    image: graylog/graylog:6.2.13
     container_name: graylog
     hostname: graylog
     environment:

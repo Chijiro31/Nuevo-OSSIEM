@@ -1,6 +1,7 @@
 services:
 
   # ============ WAZUH STACK ============
+
   wazuh-indexer:
     image: wazuh/wazuh-indexer:4.14.4
     container_name: wazuh-indexer
@@ -66,8 +67,6 @@ services:
     user: root
     volumes:
       - ./filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - filebeat-data:/usr/share/filebeat/data
     environment:
       - OPENSEARCH_HOST=wazuh-indexer
@@ -81,6 +80,32 @@ services:
       - wazuh-indexer
     healthcheck:
       test: filebeat test config
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fluent-bit:
+    image: fluent/fluent-bit:2.1.10
+    container_name: fluent-bit
+    volumes:
+      - ./fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log/journal:/var/log/journal:ro
+      - fluent-bit-data:/var/log/fluent-bit
+    environment:
+      - FLUENT_BIT_LOG_LEVEL=info
+    ports:
+      - "2020:2020"
+    networks:
+      - wazuh-net
+      - graylog-net
+    depends_on:
+      - wazuh-indexer
+      - graylog
+    healthcheck:
+      test: curl -s http://localhost:2020/api/v1/health || exit 1
       interval: 10s
       timeout: 5s
       retries: 5
@@ -192,6 +217,7 @@ volumes:
   wazuh-etc:
   wazuh-var:
   filebeat-data:
+  fluent-bit-data:
   # Graylog
   mongo-data:
   graylog-opensearch-data:

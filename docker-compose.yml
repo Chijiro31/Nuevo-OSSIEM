@@ -113,66 +113,78 @@ services:
       - ./grafana/grafana.ini:/etc/grafana/grafana.ini
     restart: unless-stopped
 
-# Graylog Docker Compose Deployment
----
-version: '3.8'
+version: "3.8"
 
 services:
   mongodb:
-    image: mongo:6.0.14
-    hostname: mongodb
-    restart: always
+    image: "mongo:6.0.14"
     volumes:
-      - mongo_data:/data/db
-    networks:
-      - graylog
+      - "mongodb_data:/data/db"
+    restart: "on-failure"
 
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    hostname: elasticsearch
-    restart: always
+  opensearch:
+    image: "opensearchproject/opensearch:2.9.0"
     environment:
-      - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-      - xpack.security.enabled=false
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      - "bootstrap.memory_lock=true"
+      - "discovery.type=single-node"
+      - "action.auto_create_index=false"
+      - "plugins.security.ssl.http.enabled=false"
+      - "plugins.security.disabled=true"
     ulimits:
       memlock:
-        soft: -1
         hard: -1
+        soft: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
-      - es_data:/usr/share/elasticsearch/data
-    networks:
-      - graylog
+      - "os_data:/usr/share/opensearch/data"
+      - "${VOLUME}/opensearch/hosts:/etc/hosts"
+    restart: "on-failure"
 
   graylog:
-    image: graylog/graylog:6.0.6
     hostname: graylog
-    restart: always
-    environment:
-      - GRAYLOG_PASSWORD_SECRET=somepasswordpepper
-      - GRAYLOG_ROOT_PASSWORD_SHA2=8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
-      - GRAYLOG_HTTP_EXTERNAL_URI=http://localhost:9000/
-      - GRAYLOG_ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - GRAYLOG_MONGODB_URI=mongodb://mongodb:27017/graylog
-    ports:
-      - "9000:9000"       # Graylog web interface
-      - "1514:1514/tcp"   # Syslog TCP
-      - "1514:1514/udp"   # Syslog UDP
-      - "12201:12201"     # GELF TCP
-      - "12201:12201/udp" # GELF UDP
-    volumes:
-      - graylog_data:/usr/share/graylog/data
-    networks:
-      - graylog
+    image: graylog/graylog:6.0.6
     depends_on:
-      - mongodb
-      - elasticsearch
-
-networks:
-  graylog:
-    driver: bridge  
+      opensearch:
+        condition: "service_started"
+      mongodb:
+        condition: "service_started"
+    entrypoint: "/usr/bin/tini -- wait-for-it opensearch:9200 --  /docker-entrypoint.sh"
+    environment:
+      GRAYLOG_NODE_ID_FILE: "/usr/share/graylog/data/config/node-id"
+      GRAYLOG_PASSWORD_SECRET: "lNLYcK78TCCDI6xJERGz3cC6u6alzBgrKIbVGWOkgtqm1ZebPm1gYz8FwIuNwQhh8rMYlrzvDsPAeOgKsENnFjctBolYKizM"
+      GRAYLOG_ROOT_PASSWORD_SHA2: "e3c652f0ba0b4801205814f8b6bc49672c4c74e25b497770bb89b22cdeb4e951"
+      GRAYLOG_HTTP_BIND_ADDRESS: "0.0.0.0:9000"
+      GRAYLOG_HTTP_EXTERNAL_URI: "http://181.225.255.63:9000/"
+      GRAYLOG_ELASTICSEARCH_HOSTS: "https://admin:SecretPassword@wazuh1.indexer:9200"
+      GRAYLOG_MONGODB_URI: "mongodb://mongodb:27017/graylog"
+      GRAYLOG_SERVER_JAVA_OPTS: "-Dlog4j2.formatMsgNoLookups=true -Djavax.net.ssl.trustStore=/usr/share/graylog/certs/cacerts -Djavax.net.ssl.trustStorePassword=changeit"
+    ports:
+    - "5044:5044/tcp"   # Beats
+    - "5140:5140/udp"   # Syslog
+    - "5140:5140/tcp"   # Syslog
+    - "5555:5555/tcp"   # RAW TCP
+    - "5555:5555/udp"   # RAW TCP
+    - "9010:9010/tcp"   # Server API
+    - "12201:12201/tcp" # GELF TCP
+    - "12201:12201/udp" # GELF UDP
+    - "13301:13301/tcp" # Forwarder data
+    - "13302:13302/tcp" # Forwarder config
+    volumes:
+      - "graylog_data:/usr/share/graylog/data/data"
+      - "graylog_journal:/usr/share/graylog/data/journal"
+      - "${VOLUME}/certs:/usr/share/graylog/certs"
+      - "${VOLUME}/hosts:/etc/hosts"
+    restart: "on-failure"
 
 volumes:
+  mongodb_data:
+  os_data:
+  graylog_data:
+  graylog_journal:
+
   # Wazuh
   wazuh_api_configuration:
   wazuh_etc:
@@ -189,9 +201,5 @@ volumes:
   wazuh-indexer-data:
   wazuh-dashboard-config:
   wazuh-dashboard-custom:
-  # Graylog
-  mongodb_data:
-  mongodb_config:
-  graylog_data:
   # Grafana
   grafana-storage:

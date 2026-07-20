@@ -68,15 +68,43 @@ desde la UI de aquí en adelante.
 
 ---
 
-## 3. OpenSearch: heap de la JVM `2g → 8g`
+## 3. OpenSearch: heap de la JVM `2g → 8g` (⚠️ revertido silenciosamente, corregido el 2026-07-20 con valor ajustado a `4g`)
 
 **Archivo:** `events-stack/events-stack.compose.yaml` (`OPENSEARCH_JAVA_OPTS`) y
 `values.yaml` (`opensearch.memory`)
 
-**Por qué:** OpenSearch usaba 61% de CPU con un heap fijo de solo 2GB, muy por debajo de
-lo que el host puede ofrecer (30GB RAM, 8 cores). Un heap tan chico fuerza garbage
+**Por qué (cambio original, 07-17):** OpenSearch usaba 61% de CPU con un heap fijo de
+solo 2GB, muy por debajo de lo que el host podía ofrecer en ese momento (30GB RAM, 8
+cores, sin ningún otro stack instalado todavía). Un heap tan chico fuerza garbage
 collection constante bajo carga. Tras subir a 8GB, el uso de CPU bajó a ~31% en la misma
 carga — confirmado con `docker stats` antes/después.
+
+**⚠️ Lo que pasó después:** este stack se administra con `stamusctl` (`compose
+update`/`config set`), que **regenera** los `*.compose.yaml` a partir de `values.yaml` +
+los defaults de `events-stack/opensearch.config.yaml` (`memory: default "2g"`). El
+cambio de `OPENSEARCH_JAVA_OPTS` se había hecho editando el compose **a mano**
+(`stamusctl config set` fallaba con el bug `invalid file path: path contains forbidden
+control characters`, ver sección 8/nota abajo), y `values.yaml` se quedó con
+`opensearch.memory: 2g` sin actualizar. En algún momento posterior al 07-17 — el
+contenedor de OpenSearch se recreó el 2026-07-18 — una regeneración de config volvió a
+generar el compose desde `values.yaml` (todavía en `2g`), pisando silenciosamente el
+cambio manual sin ningún error visible.
+
+**Corrección (2026-07-20):** se detectó la reversión al revisar el archivo y encontrar
+`-Xms2g -Xmx2g` en vez de `8g`. Esta vez se actualizó primero `values.yaml`
+(`opensearch.memory`) como fuente real de verdad antes de tocar el compose, para que una
+futura regeneración no vuelva a revertirlo. `stamusctl config set`/`compose update`
+siguen con el mismo bug de path sin resolver, así que la aplicación real se hizo de
+nuevo editando el compose a mano + `docker compose -f compose.yml up -d opensearch`.
+
+**Valor final ajustado a `4g`, no `8g`:** para el 07-17 el host no tenía instalado nada
+del stack SOCFortress CoPilot (Wazuh, Graylog, MySQL, etc. — ver secciones 11 y 12). Para
+el 07-20 ese stack adicional ya usa varios GB de RAM en el mismo host, dejando solo
+~8.3GB disponibles de los 30GB totales. Se decidió con el usuario ir a `4g` (2x el valor
+original de 2g, mismo beneficio de reducir GC) en vez de repetir `8g` a ciegas, para no
+arriesgar presión de memoria/OOM con todos los servicios corriendo a la vez. Confirmado
+tras el cambio: contenedor `healthy`, `-Xmx4g` real en el proceso, resto del stack de
+Clear NDR sin afectación.
 
 ---
 
@@ -158,6 +186,11 @@ y `values.yaml` (`opensearch.ism.delete_min_index_age`)
 conservador. Se subió el umbral de borrado (transición `warm → delete`) a 45 días. La
 transición `hot → warm` se dejó en 7 días (eso solo afecta a que el índice pase a
 solo-lectura para liberar recursos de escritura, no borra nada).
+
+**⚠️ Se revirtió silenciosamente y se corrigió el 2026-07-20** — ver sección 13: el JSON
+real que Terraform aplica (`utils/ism/hot_warm_delete.json`) se había quedado en `15d`
+pese a que `values.yaml` decía `45d`, el mismo patrón que el heap de OpenSearch
+(sección 3). Reaplicado y confirmado en vivo contra la API de OpenSearch.
 
 ---
 
@@ -334,6 +367,110 @@ Wazuh + 6 de Suricata en el momento de la prueba).
 
 ---
 
+## 13. Auditoría de `values.yaml` vs. compose reales (2026-07-20)
+
+A raíz de encontrar el heap de OpenSearch revertido (sección 3), se auditó **cada clave**
+de `values.yaml` contra lo que de verdad está aplicado en los `*.compose.yaml` y archivos
+relacionados, para detectar más casos del mismo patrón (edición manual del compose sin
+actualizar `values.yaml`, seguida de una regeneración de `stamusctl` que revierte todo en
+silencio, sin ningún error visible).
+
+**Confirmados con impacto real:**
+
+1. **Retención ISM otra vez en 15d, no 45d** — ver nota en sección 7. El JSON real que
+   Terraform aplica (`utils/ism/hot_warm_delete.json`) tenía `min_index_age: "15d"` en la
+   transición `warm → delete`. Corregido a `45d` y reaplicado con
+   `docker compose -f compose.yml run --rm setup-ism` — confirmado en vivo contra
+   `GET /_plugins/_ism/policies/hot_warm_delete` en OpenSearch.
+2. **Actualización automática de reglas de Suricata nunca estaba conectada.**
+   `utils/utils.compose.yaml` declaraba el config `cron-daily-scirius` (apunta a
+   `cron/daily/scirius-update-suri-rules.sh`, que sí existe y hace
+   `docker exec config-scirius-... manage.py updatesuricata`), pero el servicio `cron`
+   solo montaba `cron-daily-logrotate` — el script de actualización de reglas nunca se
+   copiaba al contenedor pese a que `values.yaml` (`cron.updatesurirules.enabled: true`)
+   decía que estaba habilitado. Se agregó el segundo `configs:` al servicio `cron` y se
+   recreó el contenedor; confirmado que ambos scripts quedan montados, ejecutables, y
+   agendados en `/etc/crontabs/root` (corre diario a las 2am junto con logrotate).
+
+**Detectado pero de bajo impacto (no se tocó):**
+
+3. `scirius.version` en `values.yaml` (`1.2.0`, "Scirius internal version" según el
+   schema) no coincide con `SCIRIUS_VERSION=1.1.3` hardcodeado en
+   `scirius/scirius.compose.yaml` (3 apariciones). Es un campo distinto de
+   `sciriusversion` (la versión de imagen real, que sí coincide:
+   `ghcr.io/stamusnetworks/scirius:clear-ndr-1.1.2`) — aparenta ser solo un label de
+   versión mostrado en la UI, sin impacto funcional confirmado. Queda pendiente de
+   decisión.
+
+**Falso positivo descartado:** `opensearch.dashboards.openport: true` parecía no tener
+contraparte en el compose (no hay `ports:` en el servicio `opensearch-dashboards`), pero
+`nginx/conf.d/selks6.conf` sí reverse-proxea Dashboards completo (`/ui/`, `/plugins/`,
+`/socket.io/`, etc. hacia `opensearch-dashboards:5601`) — el acceso funciona vía nginx,
+no por mapeo directo de puerto. No requiere ningún cambio.
+
+**Lección para el futuro:** mientras `stamusctl config set`/`compose update` sigan rotos
+(bug `invalid file path: path contains forbidden control characters`, confirmado de
+nuevo en esta sesión), cualquier cambio de configuración debe aplicarse en **dos
+lugares**: el archivo realmente consumido en runtime (compose, JSON de política, etc.) Y
+`values.yaml`, para que una futura regeneración no vuelva a revertir el cambio sin avisar.
+
+---
+
+## 14. Chequeo de salud (2026-07-20) y ajuste de `vm.swappiness`
+
+Con todo el stack de CoPilot/Wazuh/Graylog corriendo en el mismo host desde el 07-18/19,
+se hizo un chequeo rápido de salud del host completo para ver si había oportunidades de
+optimización nuevas dado el cambio real de circunstancias (más servicios compitiendo por
+la misma RAM/CPU que cuando se hizo la sesión original del 07-17).
+
+**Descartado como falsa alarma:** el contador acumulado de `drop` de Suricata mostraba
+40% (`22.8M` de `57M` paquetes). Medido en vivo (dos muestras separadas por 20s):
+11,865 paquetes nuevos, 3 drops → **0.025% en tiempo real**. El `ring-size: 20000` de la
+sección 10 sigue intacto en `containers-data/suricata/etc/suricata.yaml` — no se
+revirtió. El 40% es historial acumulado (de antes del fix o de algún pico puntual), no
+un problema actual.
+
+**Encontrado y corregido:** el host estaba usando swap activamente (1.4GB de 2GB) con
+`vm.swappiness` en el default del sistema (`60`), pese a tener ~6.4GB "disponible" via
+caché reclamable. Con tres JVMs tipo OpenSearch corriendo a la vez en el mismo host
+(Clear NDR: heap 4g, Wazuh Indexer: 512m, Graylog OpenSearch: 512m), que el kernel
+prefiera swapear páginas de heap en vez de soltar caché de disco primero es
+particularmente malo — se traduce en pausas de GC largas e impredecibles.
+
+**Qué se cambió:**
+```bash
+sudo sysctl vm.swappiness=10       # aplicado en caliente, efecto inmediato
+echo 'vm.swappiness=10' >> /etc/sysctl.conf   # persistido para sobrevivir un reinicio
+```
+
+**Por qué 10 y no 0:** `0` deshabilita el swap casi por completo incluso bajo presión
+real de memoria (puede disparar el OOM killer antes de lo deseable); `10` es el valor
+recomendado de forma común para hosts con cargas dominadas por JVMs (bases de datos,
+motores de búsqueda) — prioriza fuertemente la caché de página sobre el swap sin
+eliminar el swap como red de seguridad ante un pico genuino de memoria.
+
+**Nota:** esto es un ajuste a nivel de todo el host, no específico de Clear NDR — pero
+afecta directamente cuánto margen de memoria le queda a Clear NDR (y a los demás
+servicios) antes de degradar rendimiento por swap.
+
+**Verificación posterior:** con `vmstat 2 5` (5 muestras cada 2s), la columna `swpd`
+(total en swap) se mantuvo exacta en 1,495,328 KB en las 5 muestras, y `so` (swap-out
+por segundo) quedó en 0 en 4 de las 5 — es decir, dejaron de generarse *nuevos*
+swap-outs. La memoria libre incluso subió levemente durante la ventana de medición
+(744MB → 776MB).
+
+⚠️ **Aclaración importante:** `vm.swappiness=10` evita que sigan ocurriendo *nuevos*
+swap-outs, pero **no libera automáticamente** el swap ya acumulado (los ~1.4GB actuales)
+— eso requiere que el kernel decida traer esas páginas de vuelta a RAM cuando algo las
+necesite (proceso gradual), o forzarlo manualmente con:
+```bash
+sudo swapoff -a && sudo swapon -a
+```
+(mueve todo lo que está en swap de vuelta a RAM de inmediato — no se ejecutó en esta
+sesión, queda como opción disponible si se quiere acelerar el vaciado).
+
+---
+
 ## Resumen de archivos tocados
 
 | Archivo | Cambio |
@@ -347,6 +484,9 @@ Wazuh + 6 de Suricata en el momento de la prueba).
 | `containers-data/suricata/etc/suricata.yaml` | `ring-size`/`block-size` af-packet |
 | `values.yaml` | `opensearch.memory`, `opensearch.ism.delete_min_index_age`, `suricata.interfaces` |
 | Base de datos (Django ORM) | Rol `Analyst` creado, permisos, reasignación de usuarios, categorías del ruleset, política ISM |
+| `utils/ism/hot_warm_delete.json` | Retención ISM `15d → 45d` (re-corregido el 07-20, ver sección 13) |
+| `utils/utils.compose.yaml` | Montado `cron-daily-scirius` en el servicio `cron` (sección 13) |
+| `/etc/sysctl.conf` (host) | `vm.swappiness=10` (sección 14) |
 
 ## Contenedores recreados durante la sesión
 

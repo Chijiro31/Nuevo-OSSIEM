@@ -1,9 +1,11 @@
 # Integración Clear NDR ↔ CoPilot (SOCFortress)
 
-**Estado: implementado y funcionando.** Este documento describe la arquitectura
-real de cómo las alertas de Suricata (Clear NDR / SELKS) llegan al mismo
-"SIEM/Alerts" de CoPilot donde ya llegan las alertas de Wazuh EDR, y sirve como
-referencia para extender el mismo patrón a otras fuentes o clientes.
+**Estado: implementado y funcionando — Clear NDR actualmente APAGADO
+(2026-07-20) por presión de memoria en el host, ver sección 7.** Este
+documento describe la arquitectura real de cómo las alertas de Suricata
+(Clear NDR / SELKS) llegan al mismo "SIEM/Alerts" de CoPilot donde ya llegan
+las alertas de Wazuh EDR, y sirve como referencia para extender el mismo
+patrón a otras fuentes o clientes.
 
 Fecha de implementación: 2026-07-19
 
@@ -159,3 +161,41 @@ bridgeando igual y viceversa.
      para ese cliente/fuente en CoPilot (puede reusar el mismo `source` si el
      formato de datos es igual).
 3. Repetir la verificación de la sección 5 con el `customer_code` nuevo.
+
+## 7. Cómo prender y apagar Clear NDR sin romper la integración
+
+**Por qué se apaga a veces:** los tres stacks (Clear NDR + Wazuh/Graylog +
+CoPilot) corren en el mismo host con recursos limitados (30GB RAM). Bajo
+presión de memoria sostenida, apagar Clear NDR mientras no se está usando
+activamente es la forma más rápida de liberar RAM real sin tocar ningún
+ajuste fino de cada servicio (ver sección 14 del changelog de optimización
+para el diagnóstico completo).
+
+**Apagar (sin borrar nada, reversible con un solo comando):**
+```bash
+cd /home/chijiro/config
+docker compose -f compose.yml stop
+```
+
+**Volver a prender:**
+```bash
+cd /home/chijiro/config
+docker compose -f compose.yml start
+```
+(usar `start`, no `up -d` — los contenedores siguen existiendo, solo están
+detenidos. `up -d` solo hace falta si en algún momento se usó `docker compose
+down`, que sí borra los contenedores, no solo los para.)
+
+**Qué esperar de la integración en cada estado:**
+
+| Estado | Comportamiento del `alert-bridge` |
+|---|---|
+| **Ambos stacks arriba** (estado normal) | Bridgea Wazuh y Suricata cada 30s, sin errores. |
+| **Solo CoPilot arriba, Clear NDR apagado** | El lado de Suricata falla cada ciclo con un error de conexión claro y controlado (`Failed to resolve 'config-opensearch-ndkjzzo5ikos77ca'`), pero **no afecta el bridging de Wazuh**, que sigue funcionando normal — cada fuente corre en su propio `try/except` (sección 3). No hay que hacer nada manual: el error se loguea y ya. |
+| **Clear NDR vuelve a prenderse** | El bridge lo detecta solo en el siguiente ciclo de polling (máximo 30s de espera) — no requiere reiniciar el contenedor `alert-bridge` ni ninguna otra acción. |
+| **Solo Clear NDR arriba, CoPilot apagado** | El bridge no puede escribir en `gl-events-aster-0` (vive en el clúster del Wazuh Indexer, parte de CoPilot) — fallaría con un error de conexión igual de controlado, sin afectar a Clear NDR en sí (Scirius/Suricata/Arkime siguen funcionando normal, ya que no dependen de CoPilot para nada). |
+
+En resumen: **apagar o prender cualquiera de los dos stacks es seguro en
+cualquier momento** — el diseño con `try/except` por fuente hace que la
+integración se autorepare sola en cuanto ambos lados vuelven a estar
+disponibles, sin ninguna intervención manual.

@@ -199,3 +199,60 @@ En resumen: **apagar o prender cualquiera de los dos stacks es seguro en
 cualquier momento** — el diseño con `try/except` por fuente hace que la
 integración se autorepare sola en cuanto ambos lados vuelven a estar
 disponibles, sin ninguna intervención manual.
+
+## 8. Despliegue planeado: Clear NDR y CoPilot en dos VMs separadas
+
+**Contexto:** todo lo descrito arriba asume que ambos stacks corren en el
+mismo host, compartiendo una red física — el `alert-bridge` puede conectarse
+a las dos redes de Docker (`siem-net` y `clearndr-ndKjZZo5ikOs77ca`)
+directamente porque ambas viven en la misma máquina. Si Clear NDR y CoPilot
+se despliegan en **dos VMs distintas** (aunque estén en la misma red privada
+del servidor físico), esas redes de Docker dejan de ser visibles entre sí —
+hay que cruzar la red real entre las VMs en vez de una red interna de Docker.
+
+**Qué cambia:**
+
+1. **`alert-bridge` debe vivir en la VM de CoPilot** (junto al Wazuh Indexer,
+   que es donde escribe `gl-events-<customer_code>-0`) — así solo necesita
+   alcanzar hacia afuera, no al revés.
+2. **Clear NDR debe exponer su OpenSearch a la red**, no solo a su propia red
+   interna de Docker:
+   ```yaml
+   # events-stack/events-stack.compose.yaml, servicio opensearch
+   ports:
+     - "9200:9200"
+   ```
+3. **Restringir ese puerto solo a la IP de la VM de CoPilot** — aunque estén
+   en la misma red privada, esa OpenSearch corre **sin contraseña**
+   (`plugins.security.disabled=true`), así que cualquiera que llegue al
+   puerto puede leer y escribir libremente ahí:
+   ```bash
+   sudo ufw allow from <IP_PRIVADA_VM_COPILOT> to any port 9200 proto tcp
+   sudo ufw deny 9200/tcp
+   ```
+4. **Apuntar el bridge a la IP real de la otra VM** (en vez del nombre
+   interno de Docker `config-opensearch-ndKjZZo5ikOs77ca`, que deja de
+   existir fuera de esa máquina):
+   ```yaml
+   # alert-bridge/docker-compose.yml
+   environment:
+     - CLEARNDR_OPENSEARCH_URL=http://<IP_PRIVADA_VM_CLEARNDR>:9200
+   ```
+   y quitar el bloque de red `clearndr-ndKjZZo5ikOs77ca` de ese compose (ya
+   no aplica).
+5. Recrear el contenedor: `docker compose up -d alert-bridge`.
+
+**Verificación una vez que ambas VMs existan:**
+```bash
+# desde la VM de CoPilot
+curl http://<IP_PRIVADA_VM_CLEARNDR>:9200/_cluster/health
+```
+
+**Pendiente:** reemplazar `<IP_PRIVADA_VM_COPILOT>` / `<IP_PRIVADA_VM_CLEARNDR>`
+por las IPs reales en cuanto ambas VMs estén creadas — todo lo demás de esta
+sección (secciones 1-7) sigue aplicando exactamente igual, solo cambia cómo
+se alcanzan las dos partes entre sí.
+En resumen: **apagar o prender cualquiera de los dos stacks es seguro en
+cualquier momento** — el diseño con `try/except` por fuente hace que la
+integración se autorepare sola en cuanto ambos lados vuelven a estar
+disponibles, sin ninguna intervención manual.
